@@ -6,7 +6,7 @@
 
 | | URL |
 |---|-----|
-| **Код (репозиторий)** | `https://github.com/YOUR_ORG/parser_landing` — подставьте публичный remote после публикации. |
+| **Код (репозиторий)** | [github.com/alex-zaporozhan/parsing_encar_-_new_landing_page](https://github.com/alex-zaporozhan/parsing_encar_-_new_landing_page) |
 | **Работающий лендинг** | `https://YOUR_DOMAIN` — подставьте URL после деплоя (VPS / PaaS). |
 
 Обновление каталога: **cron** на сервере или **расписание в Jenkins** — примеры ниже.
