@@ -1,13 +1,15 @@
+# Запуск с образами из GitHub Container Registry (без Docker Hub).
+# Сборка и push: Jenkins (или вручную). На VPS: см. README «GHCR».
+#
+# docker compose -f docker-compose.ghcr.yml --env-file .env up -d
+
 services:
   api:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    image: ghcr.io/${GHCR_OWNER:-alex-zaporozhan}/encar-landing-api:${IMAGE_TAG:-latest}
     ports:
       - "8000:8000"
     environment:
       SQLITE_PATH: /data/encar.db
-      # Прод: URL сайта с протоколом, через запятую (см. README «Деплой на VPS»)
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
     volumes:
       - encar_data:/data
@@ -22,12 +24,7 @@ services:
       retries: 3
 
   web:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-      args:
-        # URL API как его видит браузер пользователя (на проде — ваш домен/прокси)
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    image: ghcr.io/${GHCR_OWNER:-alex-zaporozhan}/encar-landing-web:${IMAGE_TAG:-latest}
     ports:
       - "3000:3000"
     depends_on:

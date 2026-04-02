@@ -86,16 +86,29 @@ npm run test:e2e
 
 Сценарии: загрузка каталога / empty, горизонтальный скролл (viewport), ссылка на encar.com, мок 500 с контрактом ошибки, OPTIONS.
 
-### CI (Jenkins)
+### CI (Jenkins) и образы в GitHub Container Registry (GHCR)
 
-Конвейер в корне: [`Jenkinsfile`](Jenkinsfile) (Declarative Pipeline).
+Конвейер: [`Jenkinsfile`](Jenkinsfile). **Docker Hub не нужен** — образы пушатся в [**GitHub Container Registry**](https://docs.github.com/packages/working-with-a-github-packages-registry/working-with-the-container-registry) (`ghcr.io`), для публичных пакетов это **бесплатно**.
 
-1. **Backend** — `python3 -m pytest -q` в `backend/`.
-2. **E2E** — в одном шаге: `uvicorn` на `127.0.0.1:8000`, ожидание `/api/v1/health`, затем `npm ci`, Playwright (`NEXT_PUBLIC_API_URL` / `E2E_API_URL` → этот API).
+| Этап | Что делает |
+|------|------------|
+| **Backend** | `pytest` в `backend/` |
+| **E2E** | uvicorn + Playwright (`NEXT_PUBLIC_API_URL` для dev = `127.0.0.1:8000`) |
+| **Docker build and push** | Только ветки **`main`** / **`master`**: `docker build` → `docker push` в `ghcr.io/<GHCR_OWNER>/encar-landing-api` и `.../encar-landing-web` |
 
-**Настройка:** New Item → Pipeline → *Pipeline script from SCM*, указать репозиторий и ветку; путь к скрипту — `Jenkinsfile`. Нужен **Linux-агент** с bash, Python 3.12+, Node 20+, `curl`; для Chromium — `npx playwright install --with-deps` (уже в шаге E2E). При падении E2E в артефактах сохраняется `frontend/playwright-report/`.
+**Агент Jenkins:** Linux, **Docker CLI + daemon** (пользователь агента в группе `docker` или socket), Python 3.12+, Node 22+, `curl`, Chromium для Playwright.
 
-Docker Hub и облачные CI для этого репозитория **не обязательны** — сборка и тесты идут на вашем Jenkins.
+**Учётные данные GHCR в Jenkins:** тип **Username with password**, id **`ghcr-pat`**: *Username* = логин GitHub, *Password* = [Personal Access Token](https://github.com/settings/tokens) с правами **`write:packages`**, **`read:packages`** (и при необходимости `delete:packages`). В классическом Jenkins: *Manage Jenkins → Credentials*.
+
+**Параметры сборки (Build with Parameters):**
+
+- **`IMAGE_TAG`** — тег образов (например `latest` или `v1.0.0`).
+- **`NEXT_PUBLIC_API_URL`** — URL API **для браузера в проде** (вшивается в Next.js при сборке образа `web`). Для релиза укажите реальный `https://...`.
+- **`GHCR_OWNER`** — пользователь или организация GitHub (по умолчанию `alex-zaporozhan`; при форке смените).
+
+После первого push откройте на GitHub **Packages** → пакет `encar-landing-api` / `encar-landing-web` → *Package settings* → **Change visibility** → Public (если нужен pull без логина на VPS).
+
+При падении E2E в артефактах — `frontend/playwright-report/`.
 
 ### Артефакты отчёта
 
@@ -114,13 +127,20 @@ python --version
 
 ## Docker Compose
 
+Переменные для **сборки и рантайма** (файл `.env` в корне репозитория рядом с `docker-compose.yml`, не коммитить):
+
+| Переменная | Назначение |
+|------------|------------|
+| `NEXT_PUBLIC_API_URL` | Полный URL API **для браузера** (вшивается в фронт при `docker compose build`). Локально: `http://localhost:8000` или `http://IP_СЕРВЕРА:8000`. |
+| `CORS_ORIGINS` | Origin сайта с фронтом, через запятую. Должен совпадать с тем, что пользователь вводит в адресной строке (`https://...`). |
+
 ```bash
 docker compose build
 docker compose up -d
 ```
 
 - API: порт **8000**, том `encar_data` → `/data/encar.db`.
-- Web: порт **3000**, образ собирается с `NEXT_PUBLIC_API_URL=http://localhost:8000` (браузер с хоста машины).
+- Web: порт **3000**.
 
 Проверка после деплоя:
 
@@ -133,6 +153,104 @@ curl -s http://localhost:8000/api/v1/health
 ```bash
 docker compose exec api python -m app.jobs.fetch_encar
 ```
+
+---
+
+## Деплой на VPS с GHCR (без сборки на сервере)
+
+Если Jenkins уже пушит образы в **ghcr.io**, на VPS достаточно `pull`, без `docker compose build`.
+
+1. Установите Docker + Compose (как ниже).
+2. Клонируйте репозиторий (нужны только `docker-compose.ghcr.yml` и `.env`).
+3. Создайте `.env`:
+
+```env
+GHCR_OWNER=alex-zaporozhan
+IMAGE_TAG=latest
+CORS_ORIGINS=https://ваш-сайт,https://www.ваш-сайт
+```
+
+4. Если пакеты **приватные**, один раз:  
+   `echo ВАШ_PAT | docker login ghcr.io -u ВАШ_GITHUB_LOGIN --password-stdin`  
+   (PAT с `read:packages`.)
+
+5. Запуск:
+
+```bash
+docker compose -f docker-compose.ghcr.yml pull
+docker compose -f docker-compose.ghcr.yml up -d
+docker compose -f docker-compose.ghcr.yml exec api python -m app.jobs.fetch_encar
+```
+
+Обновление после нового релиза: `docker compose -f docker-compose.ghcr.yml pull && docker compose -f docker-compose.ghcr.yml up -d`.
+
+**Важно:** URL API в браузере зашит в образ **`web`** на этапе Jenkins — при смене домена API пересоберите образ в Jenkins с новым `NEXT_PUBLIC_API_URL` и снова `pull` на VPS.
+
+---
+
+## Деплой на VPS (сборка образов на сервере)
+
+Если GHCR не используете — собирайте из исходников на машине (см. раздел **Docker Compose** выше).
+
+### 1. Сервер
+
+- Ubuntu 22.04+ (или аналог), открыты порты **22** (SSH), **80/443** (если сразу ставите nginx + HTTPS) или временно **3000** и **8000** для проверки.
+
+Установите Docker Engine и плагин Compose ([официальная инструкция](https://docs.docker.com/engine/install/ubuntu/)).
+
+### 2. Клон и переменные
+
+```bash
+sudo apt update && sudo apt install -y git
+git clone https://github.com/alex-zaporozhan/parsing_encar_-_new_landing_page.git
+cd parsing_encar_-_new_landing_page
+```
+
+Создайте `.env` в **корне** репозитория (рядом с `docker-compose.yml`):
+
+**Вариант A — быстрый тест по IP (без домена):**
+
+```env
+NEXT_PUBLIC_API_URL=http://ВАШ_IP:8000
+CORS_ORIGINS=http://ВАШ_IP:3000
+```
+
+**Вариант B — один домен и nginx впереди (рекомендуется для прод):**  
+Проксируйте `https://example.com` → контейнер `web:3000`, а `https://example.com/api` → префикс FastAPI (нужен nginx с `location /api/` → `proxy_pass` на `http://127.0.0.1:8000` с нужным `strip`/префиксом) **или** отдельный поддомен `https://api.example.com` → порт 8000. Тогда, например:
+
+```env
+NEXT_PUBLIC_API_URL=https://api.example.com
+CORS_ORIGINS=https://example.com
+```
+
+После **любого** изменения `NEXT_PUBLIC_API_URL` нужна пересборка фронта: `docker compose build web --no-cache` (или полный `docker compose build`).
+
+### 3. Запуск
+
+```bash
+docker compose build
+docker compose up -d
+docker compose exec api python -m app.jobs.fetch_encar
+```
+
+Проверка: `curl -s http://127.0.0.1:8000/api/v1/health`, в браузере — `http://ВАШ_IP:3000` (или домен через nginx).
+
+### 4. Обновление кода
+
+```bash
+cd parsing_encar_-_new_landing_page
+git pull
+docker compose build
+docker compose up -d
+```
+
+### 5. Расписание импорта ENCAR
+
+Используйте **cron** на VPS (раздел ниже), подставив путь к проекту и вызов:
+
+`docker compose exec -T api python -m app.jobs.fetch_encar`
+
+(или отдельный systemd timer).
 
 ---
 
