@@ -86,11 +86,31 @@ npm run test:e2e
 
 Сценарии: загрузка каталога / empty, горизонтальный скролл (viewport), ссылка на encar.com, мок 500 с контрактом ошибки, OPTIONS.
 
-### CI (Jenkins) и образы в GitHub Container Registry (GHCR)
+### GitHub Actions → Docker Hub (основной путь для публичного репо)
 
-**Единственный CI для кода и образов — Jenkins** ([`Jenkinsfile`](Jenkinsfile]): отдельные **GitHub Actions в репозитории не используются** (чтобы не зависеть от квот минут Actions и не дублировать пайплайн). Реестр образов — [**GHCR**](https://docs.github.com/packages/working-with-a-github-packages-registry/working-with-the-container-registry) (`ghcr.io`); для **публичных** пакетов хранение и pull обычно **без платы**; минуты Actions при этом **не расходуются**.
+Workflow: [`.github/workflows/publish-dockerhub.yml`](.github/workflows/publish-dockerhub.yml) — при **push в `main`** или вручную (**Actions → Publish images to Docker Hub → Run workflow**) собирает и пушит:
 
-Конвейер: **Docker Hub не нужен** — после успешных тестов Jenkins делает `docker build` → `docker push` в `ghcr.io/<GHCR_OWNER>/encar-landing-api` и `.../encar-landing-web`.
+- `<dockerhub_user>/encar-landing-api:<tag>`
+- `<dockerhub_user>/encar-landing-web:<tag>`
+
+**Биллинг:** для **публичного** репозитория GitHub обычно **не тарифицирует минуты** стандартных `ubuntu-latest` runner для таких job ([о биллинге Actions](https://docs.github.com/en/billing/concepts/product-billing/github-actions#about-billing-for-github-actions) — уточняйте актуальные правила в аккаунте).
+
+**Секреты** (Settings → Secrets and variables → Actions → **Secrets**):
+
+| Secret | Значение |
+|--------|----------|
+| `DOCKERHUB_USERNAME` | Логин [Docker Hub](https://hub.docker.com/) |
+| `DOCKERHUB_TOKEN` | **Access Token** (не пароль): Hub → *Account Settings* → *Security* → *New Access Token* |
+
+Опционально **Variables** → `NEXT_PUBLIC_API_URL` — для автосборки ветки `main` (иначе в образ `web` попадёт `http://127.0.0.1:8000`). Для релиза удобнее **Run workflow** с полем `next_public_api_url`.
+
+На VPS: [`docker-compose.hub.yml`](docker-compose.hub.yml), в `.env` — `DOCKERHUB_USER` (логин, нижний регистр), `IMAGE_TAG`, `CORS_ORIGINS`. Публичные образы на Hub часто тянутся без `docker login` (лимиты pull см. в политике Docker).
+
+### Jenkins и образы в GitHub Container Registry (GHCR, опционально)
+
+**Jenkins** — программа **на вашем сервере** (или у компании), которая по триггеру запускает тесты и `docker build`/`push`. **Отдельной «регистрации на jenkins.io» для проекта нет:** [`Jenkinsfile`](Jenkinsfile) описывает пайплайн, если Jenkins уже развёрнут. Для этого репозитория Jenkins **не обязателен**, если вы используете **GitHub Actions** выше.
+
+Если Jenkins используете: после успешных тестов — `docker push` в [**GHCR**](https://docs.github.com/packages/working-with-a-github-packages-registry/working-with-the-container-registry) (`ghcr.io`); для **публичных** пакетов хранение и pull обычно **без платы**.
 
 | Этап | Что делает |
 |------|------------|
@@ -160,7 +180,7 @@ docker compose exec api python -m app.jobs.fetch_encar
 
 ## Деплой на VPS с GHCR (без сборки на сервере)
 
-Если Jenkins уже пушит образы в **ghcr.io**, на VPS достаточно `pull`, без `docker compose build`.
+Если образы уже в **ghcr.io** (пуш из **Jenkins** или вручную), на VPS достаточно `pull`, без `docker compose build`.
 
 1. Установите Docker + Compose (как ниже).
 2. Клонируйте репозиторий (нужны только `docker-compose.ghcr.yml` и `.env`).
@@ -186,13 +206,38 @@ docker compose -f docker-compose.ghcr.yml exec api python -m app.jobs.fetch_enca
 
 Обновление после нового релиза: `docker compose -f docker-compose.ghcr.yml pull && docker compose -f docker-compose.ghcr.yml up -d`.
 
-**Важно:** URL API в браузере зашит в образ **`web`** на этапе Jenkins — при смене домена API пересоберите образ в Jenkins с новым `NEXT_PUBLIC_API_URL` и снова `pull` на VPS.
+**Важно:** URL API в браузере зашит в образ **`web`** при сборке CI — при смене домена пересоберите образ (Jenkins или **Run workflow** в Actions) с новым `NEXT_PUBLIC_API_URL` и снова `pull` на VPS.
+
+---
+
+## Деплой на VPS с Docker Hub (без сборки на сервере)
+
+Если образы пушит workflow **GitHub Actions → Docker Hub** (см. выше), на сервере используйте [`docker-compose.hub.yml`](docker-compose.hub.yml).
+
+1. Docker + Compose, клон репозитория (нужны `docker-compose.hub.yml` и `.env`).
+2. `.env`:
+
+```env
+DOCKERHUB_USER=ваш_логин_hub_нижний_регистр
+IMAGE_TAG=latest
+CORS_ORIGINS=https://ваш-сайт,https://www.ваш-сайт
+```
+
+3. Запуск:
+
+```bash
+docker compose -f docker-compose.hub.yml pull
+docker compose -f docker-compose.hub.yml up -d
+docker compose -f docker-compose.hub.yml exec api python -m app.jobs.fetch_encar
+```
+
+Обновление: `docker compose -f docker-compose.hub.yml pull && docker compose -f docker-compose.hub.yml up -d`. URL API в **`web`** задаётся при сборке в Actions (`vars.NEXT_PUBLIC_API_URL` или input workflow).
 
 ---
 
 ## Деплой на VPS (сборка образов на сервере)
 
-Если GHCR не используете — собирайте из исходников на машине (см. раздел **Docker Compose** выше).
+Если ни GHCR, ни Hub не используете — собирайте из исходников на машине (см. раздел **Docker Compose** выше).
 
 ### 1. Сервер
 

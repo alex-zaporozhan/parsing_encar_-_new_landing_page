@@ -1,0 +1,35 @@
+# Запуск с образами из Docker Hub (собраны GitHub Actions или вручную).
+#
+# docker compose -f docker-compose.hub.yml --env-file .env up -d
+#
+# В .env: DOCKERHUB_USER=ваш_логин_hub (нижний регистр), IMAGE_TAG=latest, CORS_ORIGINS=...
+
+services:
+  api:
+    image: ${DOCKERHUB_USER}/encar-landing-api:${IMAGE_TAG:-latest}
+    ports:
+      - "8000:8000"
+    environment:
+      SQLITE_PATH: /data/encar.db
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+    volumes:
+      - encar_data:/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health').read()\"",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  web:
+    image: ${DOCKERHUB_USER}/encar-landing-web:${IMAGE_TAG:-latest}
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+volumes:
+  encar_data:
