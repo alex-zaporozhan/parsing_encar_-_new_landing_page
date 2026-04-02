@@ -88,11 +88,9 @@ npm run test:e2e
 
 ### CI (Jenkins) и образы в GitHub Container Registry (GHCR)
 
-**Первый выклад в GHCR без Jenkins:** workflow [`.github/workflows/publish-ghcr.yml`](.github/workflows/publish-ghcr.yml) — при **push в `main`** (и вручную *Actions → Publish images to GHCR → Run workflow*) собирает и пушит `encar-landing-api` и `encar-landing-web` в `ghcr.io/<владелец>/...`, используя встроенный **`GITHUB_TOKEN`** (отдельный PAT не нужен). Имя владельца в нижнем регистре совпадает с `github.repository_owner` (у форка — ваш логин; тогда в `.env` на VPS укажите свой `GHCR_OWNER`).
+**Единственный CI для кода и образов — Jenkins** ([`Jenkinsfile`](Jenkinsfile]): отдельные **GitHub Actions в репозитории не используются** (чтобы не зависеть от квот минут Actions и не дублировать пайплайн). Реестр образов — [**GHCR**](https://docs.github.com/packages/working-with-a-github-packages-registry/working-with-the-container-registry) (`ghcr.io`); для **публичных** пакетов хранение и pull обычно **без платы**; минуты Actions при этом **не расходуются**.
 
-Опционально в репозитории: **Settings → Secrets and variables → Actions → Variables** — `NEXT_PUBLIC_API_URL` для автоматических push-сборок ветки `main` (иначе по умолчанию `http://127.0.0.1:8000`). Для релиза удобнее **Run workflow** с полем `next_public_api_url`.
-
-Конвейер: [`Jenkinsfile`](Jenkinsfile). **Docker Hub не нужен** — образы пушатся в [**GitHub Container Registry**](https://docs.github.com/packages/working-with-a-github-packages-registry/working-with-the-container-registry) (`ghcr.io`), для публичных пакетов это **бесплатно**.
+Конвейер: **Docker Hub не нужен** — после успешных тестов Jenkins делает `docker build` → `docker push` в `ghcr.io/<GHCR_OWNER>/encar-landing-api` и `.../encar-landing-web`.
 
 | Этап | Что делает |
 |------|------------|
