@@ -1,0 +1,53 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Env
+.env
+.env.local
+
+# Внутренние docs, артефакты, ROLE_*, паспорта — не в git (@LEAD)
+docs/
+
+# Конституция Cursor / локальные исключения агента
+.cursorrules
+.cursorignore
+
+# Методология в корне репозитория (дубликаты вне docs/, если появятся)
+/ROLE_*.md
+/TEMPLATE_*.md
+/*PASSPORT*.md
+/ENGINEERING_PLAN.md
+/DOMAIN_STANDARDS.md
+/LEAD_*.md
+
+# Data
+data/*.db
+data/*.sqlite
+
+# Node
+node_modules/
+.next/
+out/
+dist/
+
+# Playwright
+playwright-report/
+test-results/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+
+# Temp recon files (local probes)
+encar_home.html
+encar_api*.json
+encar_sr.json
+ryvuss.js
+search.fc.js
+abstract.js
+paging.js
